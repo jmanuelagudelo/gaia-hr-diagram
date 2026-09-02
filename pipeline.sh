@@ -1,0 +1,1 @@
+$URL = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync?request=doQuery&lang=ADQL&format=csv&query=" 
