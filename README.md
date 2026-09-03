@@ -160,6 +160,8 @@ versionan en Git.
 
 El resultado final es el diagrama Hertzsprung-Russell:
 
+![Diagrama Hertzsprung-Russell de Gaia DR3](resultados/diagrama_hr.png)
+
 ```text
 resultados/diagrama_hr.png
 ```
@@ -193,6 +195,14 @@ En el diagrama se distinguen claramente:
   densidad. Su presencia cierra el relato evolutivo: de la secuencia principal
   a gigante roja y, finalmente, a enana blanca.
 
+La gran acumulación de estrellas en la **parte inferior** del diagrama corresponde a las estrellas **débiles** (magnitud
+absoluta alta), que dominan una muestra local limitada en volumen. Está formada
+por el extremo frío y poco luminoso de la **secuencia principal** (enanas rojas
+de tipo M, las estrellas más abundantes de la vecindad solar) y por la secuencia
+de **enanas blancas** en la zona inferior izquierda. El eje vertical es
+correcto: la magnitud `M_G` aumenta hacia abajo (más luminoso arriba, más débil
+abajo), como es habitual en un diagrama HR.
+
 La identificación de estas regiones en el código es **geométrica y
 aproximada** (cortes en color y magnitud absoluta), no una clasificación
 espectroscópica.
@@ -213,6 +223,16 @@ La interpretación del diagrama está sujeta a varias limitaciones:
   masivas más lejanas; además, no es representativa de toda la Galaxia.
 - **Límite de magnitud de Gaia**: las estrellas más débiles no están incluidas,
   lo que recorta la parte inferior de la secuencia principal.
+- **Límite de brillo de Gaia (saturación)**: el catálogo `gaia_source`/`gaiadr3`
+  no incluye estrellas más brillantes que `G ≈ 1.7` (el objeto más brillante del
+  catálogo tiene `G ≈ 1.73`). Las pocas estrellas con `G` entre ~1.7 y ~2.0 que
+  sí aparecen tienen **paralaje nulo** (la astrometría se satura), por lo que no
+  superan el corte `Plx > 20`. Resultado: no hay ninguna estrella con `G < 2` en
+  la muestra. Faltan por tanto las gigantes rojas más cercanas y brillantes
+  (Arcturus, Pollux, Aldebarán, Capella, etc.), y la parte superior de la rama
+  de gigantes aparece despoblada. Las gigantes rojas que sí se ven (alrededor de
+  un centenar) son las más lejanas y débiles, con `G` entre ~2 y ~7. Es una
+  limitación del catálogo, **no** un filtro ni un error de cálculo del proyecto.
 - **`M_G` sin corrección por extinción**: la magnitud absoluta calculada aquí
   no incorpora la extinción, por lo que está sistemáticamente afectada para
   estrellas en regiones con polvo.

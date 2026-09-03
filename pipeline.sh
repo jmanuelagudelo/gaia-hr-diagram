@@ -9,7 +9,6 @@ DB="${DATOS}/datos_mision.db"
 PNG="${RESULTADOS}/diagrama_hr.png"
 ENDPOINT="https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 
-
 #muestra local d < ~50 pc señal/ruido de paralaje alto (Plx/e_Plx > 10).
 QUERY='SELECT TOP 50000 Plx, e_Plx, Gmag, BPmag, RPmag FROM "I/355/gaiadr3" WHERE Plx > 20 AND Plx / e_Plx > 10 AND Gmag IS NOT NULL'
 
@@ -70,3 +69,15 @@ info "Generando el diagrama Hertzsprung-Russell..."
 python3 analisis_visual.py --db "${DB}" --out "${PNG}"
 
 info "Pipeline completado. Resultado: ${PNG}"
+if [[ -f "${PNG}" ]]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        open "${PNG}"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        xdg-open "${PNG}"
+    else
+        error "No sé cómo abrir automáticamente la imagen en este sistema."
+    fi
+else
+    error "No se encontró la imagen: ${PNG}"
+    exit 1
+fi

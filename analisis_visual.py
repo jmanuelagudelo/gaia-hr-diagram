@@ -3,9 +3,6 @@
 - Distancia:            d[pc] = 1000 / p[mas]
 - Índice de color:      BP_RP = G_BP - G_RP
 - Magnitud absoluta:    M_G = G + 5*log10(p) - 10   (con p en mas)
-
-Genera un diagrama HR e identifica de forma aproximada la secuencia principal y la
-región de gigantes rojas.
 """
 
 import argparse
@@ -15,8 +12,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import LogNorm
-from matplotlib.patches import Polygon, Rectangle
+from matplotlib.colors import LinearSegmentedColormap
 
 # --- Regiones aproximadas del diagrama HR ------------------------------------
 # Gigantes rojas: estrellas rojas (BP_RP grande) y luminosas (M_G pequeña),
@@ -35,11 +31,30 @@ SECUENCIA_PRINCIPAL = {
     "bp_rp_max": 3.5,
 }
 
+# --- Curvas de clase de luminosidad (clasificación MKK) ------------------------
+# Puntos ancla (BP_RP, M_G) de cada clase de luminosidad. Se interpolan con un
+# polinomio de bajo grado para obtener curvas suaves. Edita estos valores a
+# mano para afinar la posición de cada curva. La clase "V" se deriva de
+# SECUENCIA_PRINCIPAL y no aparece aquí.
+COLOR_CURVAS = "#e066ff"  # magenta de las curvas y de sus etiquetas
+
+CURVAS_LUMINOSIDAD = {
+    "Ia": [(-0.3, -6.0), (0.2, -6.2), (0.7, -6.4), (1.2, -6.5), (1.7, -6.7), (2.2, -6.9)],
+    "Ib": [(-0.3, -4.2), (0.2, -4.4), (0.7, -4.6), (1.2, -4.8), (1.7, -5.0), (2.2, -5.2)],
+    "II": [(-0.2, -2.2), (0.3, -2.4), (0.7, -2.6), (1.1, -2.8), (1.5, -3.0), (2.0, -3.3)],
+    "III": [(0.5, 1.0), (0.8, 0.7), (1.0, 0.5), (1.4, 0.1), (1.8, -0.6), (2.2, -1.4)],
+    "IV": [(0.1, 0.3), (0.4, 1.2), (0.7, 2.2), (1.0, 3.2), (1.3, 4.2), (1.6, 5.2)],
+    "Enanas blancas": [(-0.3, 10.5), (-0.1, 11.3), (0.1, 12.2), (0.3, 13.3), (0.5, 14.5), (0.7, 15.6)],
+}
+
+# Orden de dibujado de las clases de luminosidad.
+CLASES_LUMINOSIDAD = ["Ia", "Ib", "II", "III", "IV", "V", "Enanas blancas"]
+
 # --- Ejes de luminosidad y magnitud absoluta ---------------------------------
 # Relación estándar entre luminosidad y magnitud absoluta, tomando como
 # L / L_sol = 10^{-0.4 * (M - M_sol)}
 MAG_ABS_SOL = 4.74
-LUMINOSIDADES = [1e4, 1e3, 1e2, 1e1, 1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
+LUMINOSIDADES = [1e5, 1e4, 1e3, 1e2, 1e1, 1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
 # --- Tipo espectral ------------------
 CLASES_ESPECTRALES = [
@@ -52,15 +67,25 @@ CLASES_ESPECTRALES = [
     ("M",  1.80, "#ff6a3d"),
 ]
 
+# Colormap continuo construido a partir de los colores de CLASES_ESPECTRALES.
+# Se interpolan los 7 colores en la posición BP_RP de cada clase (O azul -> M
+# rojo). Fuera del rango [-0.35, 1.80] el color queda fijo en el extremo.
+_BP_MIN_ANCLA = CLASES_ESPECTRALES[0][1]
+_BP_MAX_ANCLA = CLASES_ESPECTRALES[-1][1]
+CMAP_ESPECTRAL = LinearSegmentedColormap.from_list(
+    "espectral",
+    [
+        ((bp - _BP_MIN_ANCLA) / (_BP_MAX_ANCLA - _BP_MIN_ANCLA), color)
+        for _, bp, color in CLASES_ESPECTRALES
+    ],
+)
+
 # --- Límites y estilo del diagrama --------------------------------------------
 X_MIN, X_MAX = -0.6, 4.0        # eje de color (BP_RP)
-MG_MIN, MG_MAX = -6.0, 18.0     # magnitud absoluta (arriba y abajo)
+MG_MIN, MG_MAX = -10.0, 18.0    # magnitud absoluta (arriba y abajo)
 
 COLOR_FONDO = "black"
 COLOR_TEXTO = "white"
-
-# Número de celdas (bins) del mapa de densidad del diagrama HR.
-BINS_DENSIDAD = (600, 600)
 
 # --- Calibración aproximada color (BP_RP) <-> temperatura efectiva (Teff) ------
 # Puntos de la relación color-temperatura para la secuencia principal. Sirven
@@ -161,17 +186,21 @@ def mascara_secuencia_principal(bp_rp, mg):
     )
 
 
-def poligono_secuencia_principal():
-    """Devuelve los vértices (x, y) del polígono de la banda de secuencia principal."""
+def curva_secuencia_principal():
+    """Curva de la clase V (secuencia principal) derivada de SECUENCIA_PRINCIPAL."""
     a = SECUENCIA_PRINCIPAL["a"]
-    x = np.linspace(
-        SECUENCIA_PRINCIPAL["bp_rp_min"], SECUENCIA_PRINCIPAL["bp_rp_max"], 100
-    )
-    y_brillante = a * x + SECUENCIA_PRINCIPAL["b_brillante"]
-    y_debil = a * x + SECUENCIA_PRINCIPAL["b_debil"]
-    xs = np.concatenate([x, x[::-1]])
-    ys = np.concatenate([y_brillante, y_debil[::-1]])
-    return xs, ys
+    b = (SECUENCIA_PRINCIPAL["b_brillante"] + SECUENCIA_PRINCIPAL["b_debil"]) / 2
+    x = np.linspace(SECUENCIA_PRINCIPAL["bp_rp_min"], SECUENCIA_PRINCIPAL["bp_rp_max"], 300)
+    return x, a * x + b
+
+
+def ajustar_curva(puntos, grado=2):
+    """Ajusta un polinomio de bajo grado a los puntos ancla (BP_RP, M_G)."""
+    xs = np.array([p[0] for p in puntos], dtype=float)
+    ys = np.array([p[1] for p in puntos], dtype=float)
+    coefs = np.polyfit(xs, ys, grado)
+    x_suave = np.linspace(xs.min(), xs.max(), 300)
+    return x_suave, np.polyval(coefs, x_suave)
 
 
 def mostrar_estadisticas(df):
@@ -193,69 +222,64 @@ def mostrar_estadisticas(df):
     print(f"  Distancia máxima:                  {distancias.max():.1f} pc")
     print(f"  Percentil 5 / 95 de distancia:     {distancias.quantile(0.05):.1f} / {distancias.quantile(0.95):.1f} pc")
     print()
-    print("=== Regiones aproximadas del diagrama (cortes geométricos) ===")
     print(f"  Estrellas en la secuencia principal: {n_ms:,}")
     print(f"  Estrellas en la región de gigantes:  {n_gigantes:,}")
-    print("  Nota: NO es una clasificación espectroscópica.")
 
 
 def dibujar_regiones(ax):
-    """Delimita (con contornos) las regiones de secuencia principal y gigantes rojas."""
-    g = GIGANTES_ROJAS
-    ax.add_patch(
-        Rectangle(
-            (g["bp_rp_min"], g["mg_min"]),
-            g["bp_rp_max"] - g["bp_rp_min"],
-            g["mg_max"] - g["mg_min"],
-            facecolor="none",
-            edgecolor="tab:red",
-            linewidth=2.0,
-            linestyle="--",
-            alpha=0.9,
-            label="Gigantes rojas (aprox.)",
-        )
-    )
+    """Dibuja las curvas de clase de luminosidad (Ia, Ib, II, III, IV, V, enanas blancas)."""
+    for nombre in CLASES_LUMINOSIDAD:
+        if nombre == "V":
+            x, y = curva_secuencia_principal()
+        else:
+            x, y = ajustar_curva(CURVAS_LUMINOSIDAD[nombre])
 
-    xs, ys = poligono_secuencia_principal()
-    ax.add_patch(
-        Polygon(
-            np.column_stack([xs, ys]),
-            closed=True,
-            facecolor="none",
-            edgecolor="tab:blue",
-            linewidth=2.0,
-            linestyle="--",
-            alpha=0.9,
-            label="Secuencia principal (aprox.)",
+        ax.plot(x, y, color=COLOR_CURVAS, linewidth=1.2, zorder=3)
+        # Etiqueta pegada al extremo derecho de cada curva (en vez de leyenda).
+        ax.text(
+            x[-1] + 0.05,
+            y[-1],
+            nombre,
+            color=COLOR_CURVAS,
+            fontsize=9,
+            va="center",
+            ha="left",
+            zorder=4,
         )
-    )
 
 
 def dibujar_densidad(ax, bp_rp, mg):
-    """Dibuja el diagrama HR como mapa de densidad (histograma 2D en escala log)."""
-    hist, x_edges, y_edges = np.histogram2d(
+    """Dibuja el diagrama HR como campo estelar: puntos coloreados por temperatura.
+
+    Cada estrella es un punto cuyo color depende del índice de color BP_RP
+    (análogo aproximado del color Johnson B-V, no el mismo índice) a través del
+    colormap continuo CMAP_ESPECTRAL. La transparencia hace que la densidad se
+    aprecie por superposición de puntos, como en un campo estelar real.
+    """
+    ax.scatter(
         bp_rp,
         mg,
-        bins=BINS_DENSIDAD,
-        range=[[X_MIN, X_MAX], [MG_MIN, MG_MAX]],
-    )
-    norm = LogNorm(vmin=1.0, vmax=max(hist.max(), 1.0))
-    ax.pcolormesh(
-        x_edges,
-        y_edges,
-        hist.T,
-        cmap="inferno",
-        norm=norm,
+        s=2,
+        c=bp_rp,
+        cmap=CMAP_ESPECTRAL,
+        vmin=_BP_MIN_ANCLA,
+        vmax=_BP_MAX_ANCLA,
+        alpha=0.7,
+        edgecolors="none",
+        linewidths=0,
         rasterized=True,
-        shading="auto",
+        zorder=1,
     )
 
 
 def dibujar_ejes_superiores(ax):
     """Añade dos ejes superiores: tipo espectral (letras) y temperatura (Teff)."""
-    # Eje de tipo espectral: letras coloreadas, pegado al borde superior.
+    # Eje de tipo espectral: letras coloreadas, con un pequeño margen sobre el
+    # borde superior para que no se peguen a la figura.
     ax_spec = ax.twiny()
     ax_spec.set_xlim(ax.get_xlim())
+    ax_spec.spines["top"].set_position(("axes", 1.03))
+    ax_spec.spines["top"].set_color(COLOR_TEXTO)
     posiciones = [bp_rp for _, bp_rp, _ in CLASES_ESPECTRALES]
     etiquetas = [letra for letra, _, _ in CLASES_ESPECTRALES]
     ax_spec.set_xticks(posiciones)
@@ -263,15 +287,16 @@ def dibujar_ejes_superiores(ax):
     for etiqueta, (_, _, color) in zip(ax_spec.get_xticklabels(), CLASES_ESPECTRALES):
         etiqueta.set_color(color)
     ax_spec.tick_params(axis="x", length=0)
-    ax_spec.spines["top"].set_color(COLOR_TEXTO)
 
-    # Eje de temperatura efectiva, desplazado por encima del de tipo espectral.
+    # Eje de temperatura efectiva, más separado del de tipo espectral. Su
+    # etiqueta se coloca por encima de las marcas para no chocar con las letras.
     ax_teff = ax.twiny()
     ax_teff.set_xlim(ax.get_xlim())
-    ax_teff.spines["top"].set_position(("axes", 1.10))
+    ax_teff.spines["top"].set_position(("axes", 1.14))
     ax_teff.set_xticks([teff_a_bp_rp(t) for t in TEFF_TICKS])
-    ax_teff.set_xticklabels([str(t) for t in TEFF_TICKS], fontsize=9)
-    ax_teff.set_xlabel(r"$T_{\mathrm{eff}}$  [K]", color=COLOR_TEXTO, fontsize=10)
+    ax_teff.set_xticklabels([str(t) for t in TEFF_TICKS], fontsize=8)
+    ax_teff.set_xlabel(r"$T_{\mathrm{eff}}$  [K]", color=COLOR_TEXTO, fontsize=9)
+    ax_teff.xaxis.set_label_coords(0.5, 1.22)
     ax_teff.tick_params(axis="x", colors=COLOR_TEXTO)
     ax_teff.spines["top"].set_color(COLOR_TEXTO)
 
@@ -282,7 +307,7 @@ def generar_diagrama(df, ruta_salida):
     """Genera y guarda el diagrama HR.
 
     Configuración:
-        - Fondo negro y mapa de densidad (histograma 2D en escala log).
+        - Fondo negro y campo estelar (puntos coloreados por temperatura).
         - Eje inferior: color (G_BP - G_RP).
         - Eje superior: tipo espectral (O..M) y temperatura efectiva (Teff).
         - Eje izquierdo: luminosidad en unidades solares (L / L_sol).
@@ -294,7 +319,7 @@ def generar_diagrama(df, ruta_salida):
     fig.patch.set_facecolor(COLOR_FONDO)
     ax.set_facecolor(COLOR_FONDO)
 
-    # Mapa de densidad del diagrama HR.
+    # Campo estelar del diagrama HR.
     dibujar_densidad(ax, df["BP_RP"], df["M_G"])
     dibujar_regiones(ax)
 
@@ -311,17 +336,20 @@ def generar_diagrama(df, ruta_salida):
     # Eje derecho: magnitud absoluta.
     ax_mag = ax.twinx()
     ax_mag.set_ylim(ax.get_ylim())
-    ax_mag.set_yticks(np.arange(-5, 20, 5))
+    ax_mag.set_yticks(np.arange(-10, 20, 5))
     ax_mag.set_ylabel(r"$M_G$  [mag]")
 
-    # Eje inferior: índice de color.
+    # Eje inferior: índice de color (análogo aproximado de B-V, no el mismo
+    # índice; BP_RP es la fotometría de Gaia).
     ax.set_xlabel(r"Color  $G_{BP} - G_{RP}$  [mag]")
 
     # Ejes superiores: tipo espectral y temperatura efectiva.
-    dibujar_ejes_superiores(ax)
+    ax_spec, ax_teff = dibujar_ejes_superiores(ax)
+    ax_spec.set_xlabel("Tipo espectral", color=COLOR_TEXTO, fontsize=10)
+    ax_spec.xaxis.set_label_coords(0.5, 1.11)
 
     # Estilo general (texto y espinas en blanco sobre fondo negro).
-    fig.suptitle("Diagrama Hertzsprung-Russell — Gaia DR3", color=COLOR_TEXTO, fontsize=13)
+    fig.suptitle("Diagrama Hertzsprung-Russell — Gaia DR3", color=COLOR_TEXTO, fontsize=13, y=0.96)
     ax.grid(True, alpha=0.15, linewidth=0.5, color=COLOR_TEXTO)
     ax.tick_params(colors=COLOR_TEXTO)
     ax_mag.tick_params(colors=COLOR_TEXTO)
@@ -332,18 +360,8 @@ def generar_diagrama(df, ruta_salida):
         ax.spines[espina].set_color(COLOR_TEXTO)
     ax_mag.spines["right"].set_color(COLOR_TEXTO)
 
-    leyenda = ax.legend(
-        loc="lower left",
-        fontsize=9,
-        facecolor=COLOR_FONDO,
-        edgecolor=COLOR_TEXTO,
-        framealpha=0.9,
-    )
-    for texto in leyenda.get_texts():
-        texto.set_color(COLOR_TEXTO)
-
     # Deja margen superior para el título y los dos ejes superiores.
-    fig.subplots_adjust(left=0.14, right=0.87, bottom=0.11, top=0.84)
+    fig.subplots_adjust(left=0.14, right=0.87, bottom=0.11, top=0.76)
 
     ruta = Path(ruta_salida)
     ruta.parent.mkdir(parents=True, exist_ok=True)
